@@ -1,0 +1,115 @@
+name: Deploy API (Elastic Beanstalk)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/api/**"
+      - "packages/core/**"
+      - "db/migrations/**"
+      - "vendor/**"
+      - "package.json"
+      - "package-lock.json"
+      - "Procfile"
+      - ".platform/**"
+      - "scripts/migrate.mjs"
+      - "scripts/build-eb-bundle.sh"
+      - ".github/workflows/deploy-api.yml"
+  workflow_dispatch:
+
+permissions:
+  id-token: write # OIDC federation to AWS — no long-lived keys
+  contents: read
+
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false
+
+env:
+  # Repo variables (Settings → Secrets and variables → Actions → Variables).
+  # AWS_DEPLOY_ROLE_ARN and AWS_REGION are required; the rest default to the
+  # names used in docs/deploy-aws.md.
+  EB_APP_NAME: ${{ vars.EB_APP_NAME || 'stamp-platform' }}
+  EB_ENV_NAME: ${{ vars.EB_ENV_NAME || 'stamp-platform-api' }}
+  EB_S3_BUCKET: ${{ vars.EB_S3_BUCKET }}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: production
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build core + api
+        run: |
+          npm run build --workspace @stamp/core
+          npm run build --workspace api
+
+      - name: Build EB bundle
+        run: scripts/build-eb-bundle.sh build/eb-bundle.zip
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ vars.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Upload bundle to S3
+        run: |
+          KEY="${EB_APP_NAME}/eb-bundle-${GITHUB_SHA}.zip"
+          aws s3 cp build/eb-bundle.zip "s3://${EB_S3_BUCKET}/${KEY}"
+          echo "S3_KEY=${KEY}" >> "$GITHUB_ENV"
+
+      - name: Create application version
+        run: |
+          aws elasticbeanstalk create-application-version \
+            --application-name "${EB_APP_NAME}" \
+            --version-label "sha-${GITHUB_SHA}" \
+            --description "GitHub Actions ${GITHUB_REF_NAME} ${GITHUB_SHA}" \
+            --source-bundle "S3Bucket=${EB_S3_BUCKET},S3Key=${S3_KEY}" \
+            --process
+
+      - name: Deploy to environment
+        run: |
+          # Wait for the application version to finish processing first.
+          for i in $(seq 1 30); do
+            STATUS=$(aws elasticbeanstalk describe-application-versions \
+              --application-name "${EB_APP_NAME}" \
+              --version-labels "sha-${GITHUB_SHA}" \
+              --query 'ApplicationVersions[0].Status' --output text)
+            [ "$STATUS" = "PROCESSED" ] && break
+            [ "$STATUS" = "FAILED" ] && { echo "version processing failed"; exit 1; }
+            sleep 5
+          done
+          aws elasticbeanstalk update-environment \
+            --application-name "${EB_APP_NAME}" \
+            --environment-name "${EB_ENV_NAME}" \
+            --version-label "sha-${GITHUB_SHA}"
+
+      - name: Wait for environment health
+        run: |
+          for i in $(seq 1 60); do
+            read -r STATUS HEALTH VERSION <<< "$(aws elasticbeanstalk describe-environments \
+              --application-name "${EB_APP_NAME}" \
+              --environment-names "${EB_ENV_NAME}" \
+              --query 'Environments[0].[Status,Health,VersionLabel]' --output text)"
+            echo "status=${STATUS} health=${HEALTH} version=${VERSION}"
+            if [ "$STATUS" = "Ready" ] && [ "$VERSION" = "sha-${GITHUB_SHA}" ]; then
+              if [ "$HEALTH" = "Green" ]; then
+                echo "deploy healthy"; exit 0
+              fi
+              echo "environment Ready but health=${HEALTH}"; exit 1
+            fi
+            sleep 15
+          done
+          echo "timed out waiting for environment"; exit 1

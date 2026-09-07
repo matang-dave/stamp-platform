@@ -10,6 +10,8 @@ export default defineConfig({
   test: {
     globals: true,
     root: './',
-    include: ['**/*.spec.ts'],
+    // *.e2e-spec.ts (apps/api/test/**) runs in the default suite too, so the
+    // root `npm run test` gate covers the full acceptance flow (T11).
+    include: ['**/*.spec.ts', '**/*.e2e-spec.ts'],
   },
 });

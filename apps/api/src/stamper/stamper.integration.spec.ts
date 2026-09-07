@@ -133,4 +133,83 @@ describe('stamper endpoints (integration)', () => {
       expect(res.body.pass.lastStampAt).toEqual(expect.any(String));
     });
   });
+
+  describe('POST /stamper/stamp', () => {
+    it('adds a stamp, logs an audit event and reports the new summary', async () => {
+      const passA = await enrollPass(cafeAId);
+      const res = await post('/stamper/stamp', { passId: passA });
+      expect(res.status).toBe(201);
+      expect(res.body).toEqual({
+        vouchersEarned: 0,
+        pass: {
+          passId: passA,
+          stamps: 1,
+          stampsRequired: 10,
+          vouchersAvailable: 0,
+          lastStampAt: expect.any(String),
+        },
+      });
+      const events = await sql`
+        select staff_id, action, detail from events where pass_id = ${passA}`;
+      expect(events).toEqual([
+        expect.objectContaining({ staffId: baristaId, action: 'stamp', detail: { count: 1 } }),
+      ]);
+    });
+
+    it('earns a voucher (with cafe expiry) when stamps reach the requirement', async () => {
+      const passA = await enrollPass(cafeAId);
+      await sql`update passes set stamps = 9 where id = ${passA}`;
+      const res = await post('/stamper/stamp', { passId: passA });
+      expect(res.status).toBe(201);
+      expect(res.body.vouchersEarned).toBe(1);
+      expect(res.body.pass).toMatchObject({ stamps: 0, vouchersAvailable: 1 });
+      const [voucher] = await sql`
+        select expires_at, redeemed_at from vouchers where pass_id = ${passA}`;
+      // Cafe A config: voucher_expiry_days = 30.
+      expect(voucher!.redeemedAt).toBeNull();
+      const expiresInDays =
+        ((voucher!.expiresAt as Date).getTime() - Date.now()) / (24 * 60 * 60 * 1000);
+      expect(expiresInDays).toBeGreaterThan(29.9);
+      expect(expiresInDays).toBeLessThan(30.1);
+      const events = await sql`
+        select action from events where pass_id = ${passA} order by id`;
+      expect(events.map((e) => e.action)).toEqual(['stamp', 'voucher_earned']);
+    });
+
+    it('rejects count > 1 without the migration flag', async () => {
+      const passA = await enrollPass(cafeAId);
+      const res = await post('/stamper/stamp', { passId: passA, count: 5 });
+      expect(res.status).toBe(400);
+      const events = await sql`select id from events where pass_id = ${passA}`;
+      expect(events).toHaveLength(0);
+    });
+
+    it('accepts a flagged paper-card migration and audits it as stamp_bulk', async () => {
+      const passA = await enrollPass(cafeAId);
+      const res = await post('/stamper/stamp', { passId: passA, count: 12, migration: true });
+      expect(res.status).toBe(201);
+      expect(res.body.vouchersEarned).toBe(1);
+      expect(res.body.pass).toMatchObject({ stamps: 2, vouchersAvailable: 1 });
+      const events = await sql`
+        select action, detail from events where pass_id = ${passA} order by id`;
+      expect(events.map((e) => e.action)).toEqual(['stamp_bulk', 'voucher_earned']);
+      expect(events[0]!.detail).toEqual({ count: 12, migration: true });
+    });
+
+    it('rejects a cross-cafe stamp with 403 and mutates nothing', async () => {
+      const passB = await enrollPass(cafeBId);
+      const res = await post('/stamper/stamp', { passId: passB });
+      expect(res.status).toBe(403);
+      expect(res.body.message).toBe('wrong_cafe');
+      const [pass] = await sql`select stamps from passes where id = ${passB}`;
+      expect(pass!.stamps).toBe(0);
+      const events = await sql`select id from events where pass_id = ${passB}`;
+      expect(events).toHaveLength(0);
+    });
+
+    it('rejects an unknown pass with 404', async () => {
+      const res = await post('/stamper/stamp', { passId: randomUUID() });
+      expect(res.status).toBe(404);
+    });
+  });
 });

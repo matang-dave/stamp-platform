@@ -7,9 +7,18 @@ import { EnrollmentModule } from './enrollment/enrollment.module.js';
 import { OwnerModule } from './owner/owner.module.js';
 import { PasskitModule } from './passkit/passkit.module.js';
 import { StamperModule } from './stamper/stamper.module.js';
+import { TenancyModule } from './tenancy/tenancy.module.js';
 
 @Module({
-  imports: [DbModule, AuthModule, EnrollmentModule, StamperModule, OwnerModule, PasskitModule],
+  imports: [
+    DbModule,
+    AuthModule,
+    TenancyModule,
+    EnrollmentModule,
+    StamperModule,
+    OwnerModule,
+    PasskitModule,
+  ],
   controllers: [AppController],
   providers: [AppService],
 })

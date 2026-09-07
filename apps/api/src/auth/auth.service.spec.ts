@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import type { INestApplication } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import { encodeQrPayload } from '@stamp/core';
 import request from 'supertest';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { AppModule } from '../app.module.js';
@@ -130,5 +131,32 @@ describe('auth + tenancy (integration)', () => {
       const res = await request(app.getHttpServer()).post('/auth/login').send(body);
       expect(res.status).toBe(401);
     }
+  });
+
+  // Builds a valid signed QR payload for a fresh pass belonging to the given cafe.
+  async function signedPayloadForPassIn(cafeId: string): Promise<string> {
+    const [{ id }] = await sql`
+      insert into passes (cafe_id, platform) values (${cafeId}, 'apple') returning id`;
+    return encodeQrPayload(id as string, process.env.QR_SIGNING_SECRET!);
+  }
+
+  it('a cafe A barista token cannot act on cafe B resources', async () => {
+    const tokenA = await login(slugA, 'anna', '1234');
+    const res = await request(app.getHttpServer())
+      .post('/stamper/scan')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ qrPayload: await signedPayloadForPassIn(cafeBId) });
+    expect(res.status).toBe(403);
+    expect(res.body.message).toBe('wrong_cafe');
+  });
+
+  it('a cafe A barista token passes the tenancy check for a cafe A pass', async () => {
+    const tokenA = await login(slugA, 'anna', '1234');
+    const res = await request(app.getHttpServer())
+      .post('/stamper/scan')
+      .set('Authorization', `Bearer ${tokenA}`)
+      .send({ qrPayload: await signedPayloadForPassIn(cafeAId) });
+    // Not 401/403: tenancy check passed; the rest of scan is T4's job (stubbed 501).
+    expect(res.status).toBe(501);
   });
 });

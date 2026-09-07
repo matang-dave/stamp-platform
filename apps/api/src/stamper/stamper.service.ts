@@ -1,5 +1,9 @@
-import { Injectable, NotImplementedException } from '@nestjs/common';
+import { Inject, Injectable, NotImplementedException } from '@nestjs/common';
 import { decodeQrPayload } from '@stamp/core';
+import type { StaffSession } from '../auth/auth.service.js';
+import { SQL } from '../db/db.provider.js';
+import type { Sql } from '../db/db.provider.js';
+import { TenancyService } from '../tenancy/tenancy.service.js';
 
 export interface ScanDto {
   qrPayload: string;
@@ -17,13 +21,23 @@ export interface RedeemDto {
 
 @Injectable()
 export class StamperService {
-  scan(body: ScanDto) {
+  constructor(
+    @Inject(SQL) private readonly sql: Sql,
+    private readonly tenancy: TenancyService,
+  ) {}
+
+  async scan(body: ScanDto, staff: StaffSession) {
     const passId = decodeQrPayload(body.qrPayload, process.env.QR_SIGNING_SECRET ?? '');
     if (passId === null) {
       return { valid: false as const };
     }
-    // TODO(milestone 2): load pass + vouchers, reject cross-tenant scans,
-    // warn on duplicate scan within the window (core.isDuplicateScan).
+    // Tenancy check (T2): a barista can only act on passes of their own cafe.
+    const [pass] = await this.sql`select cafe_id from passes where id = ${passId}`;
+    if (pass) {
+      this.tenancy.assertSameCafe(staff.cafeId, pass.cafeId as string);
+    }
+    // TODO(milestone 2, T4): load pass + vouchers, warn on duplicate scan
+    // within the window (core.isDuplicateScan).
     throw new NotImplementedException(`scan(${passId})`);
   }
 

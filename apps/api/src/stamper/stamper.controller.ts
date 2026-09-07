@@ -1,4 +1,6 @@
 import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import type { StaffSession } from '../auth/auth.service.js';
+import { CurrentStaff } from '../auth/current-staff.decorator.js';
 import { StaffGuard } from '../auth/staff.guard.js';
 import { StamperService } from './stamper.service.js';
 import type { RedeemDto, ScanDto, StampDto } from './stamper.service.js';
@@ -11,8 +13,8 @@ export class StamperController {
   constructor(private readonly stamper: StamperService) {}
 
   @Post('scan')
-  scan(@Body() body: ScanDto) {
-    return this.stamper.scan(body);
+  scan(@Body() body: ScanDto, @CurrentStaff() staff: StaffSession) {
+    return this.stamper.scan(body, staff);
   }
 
   @Post('stamp')

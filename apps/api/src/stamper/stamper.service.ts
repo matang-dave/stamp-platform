@@ -7,6 +7,7 @@ import {
 } from '@nestjs/common';
 import { applyStamps, decodeQrPayload, isDuplicateScan, voucherExpiresAt } from '@stamp/core';
 import type { PassSummary, ScanResponse, StampResponse } from '@stamp/core';
+import type postgres from 'postgres';
 import type { StaffSession } from '../auth/auth.service.js';
 import { SQL } from '../db/db.provider.js';
 import type { Sql } from '../db/db.provider.js';
@@ -32,6 +33,10 @@ export interface RedeemDto {
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+// Queries run either on the pool or inside a transaction handle; ISql is the
+// shared base of postgres.Sql and postgres.TransactionSql.
+type Queryable = postgres.ISql<NonNullable<unknown>>;
 
 @Injectable()
 export class StamperService {
@@ -142,7 +147,7 @@ export class StamperService {
 
   // Loads the PassSummary shared by all stamper responses. Callable with the
   // pool or a transaction handle so mutations report post-commit state.
-  private async passSummary(sql: Sql, passId: string): Promise<PassSummary> {
+  private async passSummary(sql: Queryable, passId: string): Promise<PassSummary> {
     const [row] = await sql`
       select
         p.id,

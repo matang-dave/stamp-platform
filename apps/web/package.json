@@ -10,6 +10,8 @@
     "test": "vitest run"
   },
   "dependencies": {
+    "@stamp/core": "*",
+    "@zxing/browser": "^0.2.1",
     "next": "16.3.4",
     "react": "19.2.8",
     "react-dom": "19.2.8"
@@ -29,6 +31,6 @@
     "msw": "^2.15.0",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vitest": "^3.2.7"
+    "vitest": "^4.1.11"
   }
 }

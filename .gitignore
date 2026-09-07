@@ -6,3 +6,6 @@ dist/
 certs/
 *.tsbuildinfo
 *.pid
+
+# EB deploy bundle output (scripts/build-eb-bundle.sh)
+build/

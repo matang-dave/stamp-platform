@@ -11,6 +11,10 @@
     "dev:web": "npm run dev --workspace web",
     "build": "npm run build --workspace @stamp/core && npm run build --workspace api && npm run build --workspace web",
     "test": "npm run test --workspaces --if-present",
-    "lint": "npm run lint --workspaces --if-present"
+    "lint": "npm run lint --workspaces --if-present",
+    "db:migrate": "tsx scripts/migrate.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.13"
   }
 }

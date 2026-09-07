@@ -8,6 +8,7 @@ import { OwnerModule } from './owner/owner.module.js';
 import { PasskitModule } from './passkit/passkit.module.js';
 import { StamperModule } from './stamper/stamper.module.js';
 import { TenancyModule } from './tenancy/tenancy.module.js';
+import { GoogleWalletModule } from './wallet/google/google-wallet.module.js';
 
 @Module({
   imports: [
@@ -18,6 +19,7 @@ import { TenancyModule } from './tenancy/tenancy.module.js';
     StamperModule,
     OwnerModule,
     PasskitModule,
+    GoogleWalletModule,
   ],
   controllers: [AppController],
   providers: [AppService],

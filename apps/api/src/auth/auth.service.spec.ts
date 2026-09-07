@@ -98,6 +98,30 @@ describe('auth + tenancy (integration)', () => {
     expect(res.status).toBe(401);
   });
 
+  it('StaffGuard rejects a missing token with 401', async () => {
+    const res = await request(app.getHttpServer()).post('/stamper/scan').send({ qrPayload: 'x' });
+    expect(res.status).toBe(401);
+  });
+
+  it('StaffGuard rejects a garbage token with 401', async () => {
+    const res = await request(app.getHttpServer())
+      .post('/stamper/scan')
+      .set('Authorization', 'Bearer not.a.jwt')
+      .send({ qrPayload: 'x' });
+    expect(res.status).toBe(401);
+  });
+
+  it('StaffGuard accepts a fresh login token', async () => {
+    const token = await login(slugA, 'anna', '1234');
+    const res = await request(app.getHttpServer())
+      .post('/stamper/scan')
+      .set('Authorization', `Bearer ${token}`)
+      .send({ qrPayload: 'unsigned-garbage' });
+    // Past the guard: invalid QR payload is a domain answer, not an auth error.
+    expect(res.status).toBe(201);
+    expect(res.body).toEqual({ valid: false });
+  });
+
   it('POST /auth/login rejects an unknown cafe or staff with 401', async () => {
     for (const body of [
       { cafeSlug: `nope-${run}`, staffName: 'anna', pin: '1234' },

@@ -1,9 +1,11 @@
-import { Body, Controller, Post } from '@nestjs/common';
+import { Body, Controller, Post, UseGuards } from '@nestjs/common';
+import { StaffGuard } from '../auth/staff.guard.js';
 import { StamperService } from './stamper.service.js';
 import type { RedeemDto, ScanDto, StampDto } from './stamper.service.js';
 
 // All stamper endpoints require an authenticated barista session (milestone 1).
 // cafe_id is always derived from that session — never from the request body.
+@UseGuards(StaffGuard)
 @Controller('stamper')
 export class StamperController {
   constructor(private readonly stamper: StamperService) {}

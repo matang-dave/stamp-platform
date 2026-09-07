@@ -18,12 +18,12 @@ export class StamperController {
   }
 
   @Post('stamp')
-  stamp(@Body() body: StampDto) {
-    return this.stamper.stamp(body);
+  stamp(@Body() body: StampDto, @CurrentStaff() staff: StaffSession) {
+    return this.stamper.stamp(body, staff);
   }
 
   @Post('redeem')
-  redeem(@Body() body: RedeemDto) {
-    return this.stamper.redeem(body);
+  redeem(@Body() body: RedeemDto, @CurrentStaff() staff: StaffSession) {
+    return this.stamper.redeem(body, staff);
   }
 }

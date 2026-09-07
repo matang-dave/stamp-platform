@@ -120,7 +120,7 @@ describe('auth + tenancy (integration)', () => {
       .send({ qrPayload: 'unsigned-garbage' });
     // Past the guard: invalid QR payload is a domain answer, not an auth error.
     expect(res.status).toBe(201);
-    expect(res.body).toEqual({ valid: false });
+    expect(res.body).toEqual({ valid: false, reason: 'bad_signature' });
   });
 
   it('POST /auth/login rejects an unknown cafe or staff with 401', async () => {
@@ -156,7 +156,8 @@ describe('auth + tenancy (integration)', () => {
       .post('/stamper/scan')
       .set('Authorization', `Bearer ${tokenA}`)
       .send({ qrPayload: await signedPayloadForPassIn(cafeAId) });
-    // Not 401/403: tenancy check passed; the rest of scan is T4's job (stubbed 501).
-    expect(res.status).toBe(501);
+    // Not 401/403: tenancy check passed; scan itself is implemented (T4).
+    expect(res.status).toBe(201);
+    expect(res.body.valid).toBe(true);
   });
 });

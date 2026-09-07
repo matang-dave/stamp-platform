@@ -44,6 +44,17 @@ export interface TextModule {
   body: string;
 }
 
+/**
+ * Entry of the loyalty object's `messages` list — Google Wallet surfaces
+ * these to the user as pass notifications. (Additive T10 extension: the
+ * owner broadcast patches this field on every saved café object.)
+ */
+export interface WalletObjectMessage {
+  id?: string;
+  header: string;
+  body: string;
+}
+
 export interface LoyaltyClassPayload {
   id: string; // `${issuerId}.cafe_${cafeId}`
   issuerName: string;
@@ -60,6 +71,8 @@ export interface LoyaltyObjectPayload {
   loyaltyPoints: LoyaltyPoints;
   textModulesData: TextModule[];
   barcode: { type: 'QR_CODE'; value: string; alternateText?: string };
+  /** Owner broadcasts (T10); absent until the first broadcast. */
+  messages?: WalletObjectMessage[];
 }
 
 /** Claims we add on top of the standard save-JWT envelope (iss/aud/typ/iat). */

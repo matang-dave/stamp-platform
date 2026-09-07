@@ -12,6 +12,12 @@ export interface PassJsonInput {
   passTypeId: string;
   webServiceUrl: string;
   qrSigningSecret: string;
+  /**
+   * Latest owner broadcast (additive T10 extension). When set, it renders as
+   * a back field whose changeMessage makes iOS show the broadcast on the
+   * lock screen after the APNs-triggered pass refresh.
+   */
+  latestMessage?: string;
 }
 
 export interface ApplePassField {
@@ -39,6 +45,8 @@ export interface ApplePassJson {
   storeCard: {
     primaryFields: ApplePassField[];
     secondaryFields: ApplePassField[];
+    /** Only present once the café sent its first broadcast (T10). */
+    backFields?: ApplePassField[];
   };
 }
 
@@ -110,6 +118,20 @@ export function buildPassJson(input: PassJsonInput): ApplePassJson {
           changeMessage: 'You have %@ free drink(s)!',
         },
       ],
+      // Owner broadcast (T10): the changeMessage puts the broadcast text on
+      // the customer's lock screen when the pass refreshes.
+      ...(input.latestMessage !== undefined
+        ? {
+            backFields: [
+              {
+                key: 'broadcast',
+                label: cafe.name,
+                value: input.latestMessage,
+                changeMessage: '%@',
+              },
+            ],
+          }
+        : {}),
     },
   };
 }

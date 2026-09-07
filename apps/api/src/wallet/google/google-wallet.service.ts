@@ -81,6 +81,25 @@ export class GoogleWalletService {
     }
   }
 
+  /**
+   * Owner broadcast backend (additive T10 extension): patch the broadcast
+   * message onto the pass's loyalty object so Google Wallet notifies the
+   * user. Same failure contract as pushUpdate — no-op when unconfigured /
+   * not a google pass, log-and-swallow when the object was never saved.
+   */
+  async pushMessage(passId: string, message: string): Promise<void> {
+    if (!this.configured) return;
+    const found = await this.passes.findWithCafe(passId);
+    if (!found || found.pass.platform !== 'google') return;
+    try {
+      await this.client!.patchObject(this.objectId(passId), {
+        messages: [{ id: 'broadcast', header: found.cafe.name, body: message }],
+      });
+    } catch (err) {
+      this.logger.warn(`google wallet broadcast failed for pass ${passId}: ${String(err)}`);
+    }
+  }
+
   // --- id helpers ------------------------------------------------------------
 
   classId(cafeId: string): string {

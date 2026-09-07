@@ -212,4 +212,107 @@ describe('stamper endpoints (integration)', () => {
       expect(res.status).toBe(404);
     });
   });
+
+  describe('POST /stamper/redeem', () => {
+    it('answers no_voucher when the pass has none', async () => {
+      const passA = await enrollPass(cafeAId);
+      const res = await post('/stamper/redeem', { passId: passA });
+      expect(res.status).toBe(201);
+      expect(res.body).toEqual({ redeemed: false, reason: 'no_voucher' });
+    });
+
+    it('redeems the oldest valid voucher, skipping expired ones', async () => {
+      const passA = await enrollPass(cafeAId);
+      const [{ id: expired }] = await sql`
+        insert into vouchers (pass_id, created_at, expires_at)
+        values (${passA}, now() - interval '60 days', now() - interval '30 days') returning id`;
+      const [{ id: oldest }] = await sql`
+        insert into vouchers (pass_id, created_at)
+        values (${passA}, now() - interval '2 days') returning id`;
+      const [{ id: newest }] = await sql`
+        insert into vouchers (pass_id, created_at)
+        values (${passA}, now() - interval '1 day') returning id`;
+
+      const res = await post('/stamper/redeem', { passId: passA });
+      expect(res.status).toBe(201);
+      expect(res.body.redeemed).toBe(true);
+      expect(res.body.pass).toMatchObject({ passId: passA, vouchersAvailable: 1 });
+
+      const rows = await sql`
+        select id, redeemed_at, redeemed_by from vouchers where pass_id = ${passA}`;
+      const byId = new Map(rows.map((r) => [r.id, r]));
+      expect(byId.get(oldest)!.redeemedAt).toBeInstanceOf(Date);
+      expect(byId.get(oldest)!.redeemedBy).toBe(baristaId);
+      expect(byId.get(newest)!.redeemedAt).toBeNull();
+      expect(byId.get(expired)!.redeemedAt).toBeNull();
+
+      const events = await sql`
+        select staff_id, action, detail from events where pass_id = ${passA}`;
+      expect(events).toEqual([
+        expect.objectContaining({
+          staffId: baristaId,
+          action: 'voucher_redeemed',
+          detail: { voucherId: oldest },
+        }),
+      ]);
+    });
+
+    it('rejects a cross-cafe redeem with 403 and mutates nothing', async () => {
+      const passB = await enrollPass(cafeBId);
+      const [{ id: voucherId }] = await sql`
+        insert into vouchers (pass_id) values (${passB}) returning id`;
+      const res = await post('/stamper/redeem', { passId: passB });
+      expect(res.status).toBe(403);
+      expect(res.body.message).toBe('wrong_cafe');
+      const [voucher] = await sql`select redeemed_at from vouchers where id = ${voucherId}`;
+      expect(voucher!.redeemedAt).toBeNull();
+    });
+
+    it('rejects an unknown pass with 404', async () => {
+      const res = await post('/stamper/redeem', { passId: randomUUID() });
+      expect(res.status).toBe(404);
+    });
+  });
+
+  // The plan's "done when": enroll (raw SQL) → scan → stamp ×10 → voucher
+  // appears → redeem → audit log has 12 events with the barista's id.
+  it('full counter flow: enroll → scan → 10 stamps → voucher → redeem → 12 audit events', async () => {
+    const passId = await enrollPass(cafeAId);
+
+    const scan = await post('/stamper/scan', { qrPayload: signedPayload(passId) });
+    expect(scan.status).toBe(201);
+    expect(scan.body).toMatchObject({
+      valid: true,
+      duplicateScanWarning: false,
+      pass: { passId, stamps: 0, vouchersAvailable: 0 },
+    });
+
+    for (let i = 1; i <= 10; i++) {
+      const res = await post('/stamper/stamp', { passId });
+      expect(res.status).toBe(201);
+      expect(res.body.pass.stamps).toBe(i % 10);
+      expect(res.body.vouchersEarned).toBe(i === 10 ? 1 : 0);
+    }
+
+    // The voucher appears on a rescan (with a duplicate warning right after stamping).
+    const rescan = await post('/stamper/scan', { qrPayload: signedPayload(passId) });
+    expect(rescan.body.pass).toMatchObject({ stamps: 0, vouchersAvailable: 1 });
+    expect(rescan.body.duplicateScanWarning).toBe(true);
+
+    const redeem = await post('/stamper/redeem', { passId });
+    expect(redeem.status).toBe(201);
+    expect(redeem.body.redeemed).toBe(true);
+    expect(redeem.body.pass).toMatchObject({ passId, stamps: 0, vouchersAvailable: 0 });
+
+    // 10× stamp + 1× voucher_earned + 1× voucher_redeemed, all by the barista.
+    const events = await sql`
+      select staff_id, action from events where pass_id = ${passId} order by id`;
+    expect(events).toHaveLength(12);
+    expect(events.every((e) => e.staffId === baristaId)).toBe(true);
+    expect(events.map((e) => e.action)).toEqual([
+      ...Array.from({ length: 10 }, () => 'stamp'),
+      'voucher_earned',
+      'voucher_redeemed',
+    ]);
+  });
 });

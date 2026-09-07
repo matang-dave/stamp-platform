@@ -1,12 +1,12 @@
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import {
-  BadRequestException,
-  Inject,
-  Injectable,
-  NotFoundException,
-  NotImplementedException,
-} from '@nestjs/common';
-import { applyStamps, decodeQrPayload, isDuplicateScan, voucherExpiresAt } from '@stamp/core';
-import type { PassSummary, ScanResponse, StampResponse } from '@stamp/core';
+  applyStamps,
+  decodeQrPayload,
+  isDuplicateScan,
+  pickVoucherToRedeem,
+  voucherExpiresAt,
+} from '@stamp/core';
+import type { PassSummary, RedeemResponse, ScanResponse, StampResponse } from '@stamp/core';
 import type postgres from 'postgres';
 import type { StaffSession } from '../auth/auth.service.js';
 import { SQL } from '../db/db.provider.js';
@@ -130,10 +130,49 @@ export class StamperService {
     return response;
   }
 
-  redeem(body: RedeemDto, _staff: StaffSession) {
-    // TODO(milestone 2): core.pickVoucherToRedeem (oldest first), mark redeemed,
-    // append audit event with barista id, push wallet update.
-    throw new NotImplementedException(`redeem(${body.passId})`);
+  async redeem(body: RedeemDto, staff: StaffSession): Promise<RedeemResponse> {
+    const response = await this.sql.begin(async (tx): Promise<RedeemResponse> => {
+      // Lock the pass row so two baristas cannot redeem the same voucher twice.
+      const [pass] = await tx`
+        select id, cafe_id from passes
+        where id = ${this.uuidOrNotFound(body.passId)}
+        for update`;
+      if (!pass) {
+        throw new NotFoundException('unknown_pass');
+      }
+      this.tenancy.assertSameCafe(staff.cafeId, pass.cafeId as string);
+
+      const rows = await tx`
+        select id, created_at, expires_at from vouchers
+        where pass_id = ${pass.id} and redeemed_at is null`;
+      const voucher = pickVoucherToRedeem(
+        rows.map((v) => ({
+          id: v.id as string,
+          createdAt: v.createdAt as Date,
+          expiresAt: v.expiresAt as Date | null,
+        })),
+        new Date(),
+      );
+      if (voucher === null) {
+        return { redeemed: false, reason: 'no_voucher' };
+      }
+
+      await tx`
+        update vouchers set redeemed_at = now(), redeemed_by = ${staff.staffId}
+        where id = ${voucher.id}`;
+      await tx`
+        insert into events (cafe_id, staff_id, pass_id, action, detail)
+        values (${pass.cafeId}, ${staff.staffId}, ${pass.id}, 'voucher_redeemed',
+                ${tx.json({ voucherId: voucher.id })})`;
+
+      return { redeemed: true, pass: await this.passSummary(tx, pass.id as string) };
+    });
+
+    if (response.redeemed) {
+      // Only an actual mutation triggers a wallet update.
+      await this.walletPush.passChanged(body.passId);
+    }
+    return response;
   }
 
   // Rejects ids Postgres could not even parse as uuid with the same 404 a

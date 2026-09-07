@@ -6,6 +6,7 @@ import { DbModule } from './db/db.module.js';
 import { EnrollmentModule } from './enrollment/enrollment.module.js';
 import { OwnerModule } from './owner/owner.module.js';
 import { PasskitModule } from './passkit/passkit.module.js';
+import { PrivacyModule } from './privacy/privacy.module.js';
 import { StamperModule } from './stamper/stamper.module.js';
 import { TenancyModule } from './tenancy/tenancy.module.js';
 import { GoogleWalletModule } from './wallet/google/google-wallet.module.js';
@@ -20,6 +21,7 @@ import { WalletPushModule } from './wallet/wallet-push.module.js';
     StamperModule,
     OwnerModule,
     PasskitModule,
+    PrivacyModule,
     GoogleWalletModule,
     WalletPushModule,
   ],

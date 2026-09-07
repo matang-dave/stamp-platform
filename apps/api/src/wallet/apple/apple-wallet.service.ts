@@ -56,6 +56,7 @@ export class AppleWalletService {
         passTypeId: this.config.passTypeId,
         webServiceUrl: this.config.webServiceUrl,
         qrSigningSecret: this.config.qrSigningSecret,
+        latestMessage: await this.latestBroadcast(found.cafe.id),
       }),
     );
     return { buffer, lastModified: await this.lastUpdatedAt(passId) };
@@ -102,11 +103,14 @@ export class AppleWalletService {
    * Null means "nothing to report" → HTTP 204.
    */
   async listUpdatablePasses(deviceId: string, updatedSince?: string): Promise<UpdatablePasses | null> {
+    // Café-level events (pass_id null, e.g. owner broadcasts — T10) count as
+    // a change for every pass of that café.
     const rows = await this.sql`
       select p.id, greatest(p.created_at, max(e.created_at)) as updated_at
       from wallet_registrations r
       join passes p on p.id = r.pass_id
-      left join events e on e.pass_id = p.id
+      left join events e
+        on e.pass_id = p.id or (e.pass_id is null and e.cafe_id = p.cafe_id)
       where r.device_id = ${deviceId} and r.platform = 'apple'
       group by p.id, p.created_at`;
     const since = updatedSince ? Number(updatedSince) : Number.NEGATIVE_INFINITY;
@@ -133,15 +137,30 @@ export class AppleWalletService {
     return this.buildPkpass(serial);
   }
 
-  /** A pass "changed" whenever any event touched it (stamp, redeem, ...). */
+  /**
+   * A pass "changed" whenever any event touched it (stamp, redeem, ...) or
+   * its café broadcast (café-level events carry pass_id null — T10).
+   */
   private async lastUpdatedAt(passId: string): Promise<Date> {
     const [row] = await this.sql`
       select greatest(p.created_at, max(e.created_at)) as updated_at
       from passes p
-      left join events e on e.pass_id = p.id
+      left join events e
+        on e.pass_id = p.id or (e.pass_id is null and e.cafe_id = p.cafe_id)
       where p.id = ${passId}
       group by p.created_at`;
     return (row?.updatedAt as Date | undefined) ?? new Date();
+  }
+
+  /** Latest owner broadcast of the café, rendered into the pass back field. */
+  private async latestBroadcast(cafeId: string): Promise<string | undefined> {
+    const [row] = await this.sql`
+      select detail->>'message' as message
+      from events
+      where cafe_id = ${cafeId} and action = 'broadcast'
+      order by created_at desc, id desc
+      limit 1`;
+    return (row?.message as string | undefined) ?? undefined;
   }
 
   // The token authenticates web-service calls; created on first .pkpass

@@ -31,6 +31,7 @@ import { HttpGoogleWalletClient } from './http-google-wallet.client.js';
   // GoogleWalletPush implements WalletPushPort (T4). It is exported — not
   // bound to the global WALLET_PUSH token — so the coordinator can compose it
   // with T9's Apple implementation in one dispatcher at merge time.
-  exports: [GoogleWalletPush],
+  // GoogleWalletService is exported for the owner broadcast (T10 pushMessage).
+  exports: [GoogleWalletPush, GoogleWalletService],
 })
 export class GoogleWalletModule {}
